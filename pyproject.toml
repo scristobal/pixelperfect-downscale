@@ -1,0 +1,10 @@
+[project]
+name = "pixel-downsizer"
+version = "0.1.0"
+description = "Detect and reverse poorly upscaled pixel art images"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pillow>=10.0.0",
+    "numpy>=1.26.0",
+]
