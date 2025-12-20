@@ -15,7 +15,7 @@ uv sync
 Detect grid size and offset of an upscaled image:
 
 ```bash
-uv run python main.py analyze image.png
+uv run python main.py analyze -i image.png
 ```
 
 ### Process
@@ -23,29 +23,21 @@ uv run python main.py analyze image.png
 Downsample to detected original resolution:
 
 ```bash
-uv run python main.py process image.png
-uv run python main.py process image.png -o output.png
-uv run python main.py process image.png --grid 4 4
-uv run python main.py process image.png --method average
+uv run python main.py process -i image.png -o output.png
 ```
-
-Options:
-- `-o, --output` - Output path
-- `--grid W H` - Override detected grid size
-- `--offset X Y` - Override detected offset
-- `--method` - Sampling method: `center` (default), `average`, `median`
-- `--square` - Assume uniform scaling
 
 ### Upscale
 
 Upscale with nearest-neighbor interpolation:
 
 ```bash
-uv run python main.py upscale image.png 4
+uv run python main.py upscale -i image.png -o output.png --scale 4
 ```
 
 ## Samples
 
 | Original (upscaled) | Downsampled | Re-upscaled |
 |---------------------|-------------|-------------|
-| <img src="samples/sample.jpeg" width="200"> | <img src="samples/downsampled_16x.png" width="200"> | <img src="samples/reupscaled.png" width="200"> |
+| <a href="samples/sample.jpeg"><img src="samples/sample.jpeg" width="200"></a> | <a href="samples/downsampled.png"><img src="samples/downsampled.png" width="200"></a> | <a href="samples/downsampled_reupscaled.png"><img src="samples/downsampled_reupscaled.png" width="200"></a> |
+
+Click on an image to see full resolution.
