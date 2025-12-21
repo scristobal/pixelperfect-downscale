@@ -28,8 +28,8 @@ This outputs `image_4x.png` (downsampled then upscaled 4x).
 
 ## Samples
 
-| Original (upscaled) | Downsampled (1x) | Upscaled (8x) | Upscaled (28x) |
-|---------------------|------------------|---------------|----------------|
-| <a href="samples/sample.jpeg"><img src="samples/sample.jpeg" width="200"></a> | <a href="samples/sample_1x.png"><img src="samples/sample_1x.png" width="200"></a> | <a href="samples/sample_8x.png"><img src="samples/sample_8x.png" width="200"></a> | <a href="samples/sample_28x.png"><img src="samples/sample_28x.png" width="200"></a> |
+| Original | Downsampled (1x) | Upscaled (8x) | Upscaled (28x) |
+|----------|------------------|---------------|----------------|
+| <a href="samples/sample.jpeg"><img src="samples/sample.jpeg" width="200" style="image-rendering: pixelated;"></a> | <a href="samples/sample_1x.png"><img src="samples/sample_1x.png" width="200" style="image-rendering: pixelated;"></a> | <a href="samples/sample_8x.png"><img src="samples/sample_8x.png" width="200" style="image-rendering: pixelated;"></a> | <a href="samples/sample_28x.png"><img src="samples/sample_28x.png" width="200" style="image-rendering: pixelated;"></a> |
 
 Click on an image to see full resolution.
