@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Downsizer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Pixel Downsizer</h1>
+        <p class="tagline">Detect and reverse poorly upscaled pixel art</p>
+    </header>
+
+    <main>
+        <section id="drop-zone" class="drop-zone">
+            <div class="drop-inner">
+                <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <p><strong>Drop an image here</strong> or click to choose</p>
+                <p class="hint">PNG or JPEG — pixel art that's been bilinearly upscaled works best</p>
+            </div>
+            <input type="file" id="file-input" accept="image/png,image/jpeg" hidden>
+        </section>
+
+
+        <section id="panels" class="hidden">
+            <div class="panel">
+                <h2>Input</h2>
+                <div class="image-wrap"><img id="input-img" alt="input"></div>
+            </div>
+            <div class="panel">
+                <h2>Output</h2>
+                <div class="image-wrap"><img id="output-img" alt="output"></div>
+            </div>
+        </section>
+
+        <section id="report" class="report hidden">
+            <div class="report-group">
+                <h3>Input</h3>
+                <dl data-group="input"></dl>
+            </div>
+            <div class="report-group">
+                <h3>Detection</h3>
+                <dl data-group="detection"></dl>
+            </div>
+            <div class="report-group">
+                <h3>Output</h3>
+                <dl data-group="output"></dl>
+            </div>
+        </section>
+
+        <section id="downloads" class="downloads hidden">
+            <span class="downloads-label">Download</span>
+            <button type="button" data-scale="1">1×</button>
+            <button type="button" data-scale="2">2×</button>
+            <button type="button" data-scale="4">4×</button>
+            <button type="button" data-scale="8">8×</button>
+            <button type="button" data-scale="16">16×</button>
+        </section>
+
+        <section id="status" class="status"></section>
+
+        <hr id="divider" class="divider hidden">
+    </main>
+
+    <footer>
+        <p>Runs locally in your browser</p>
+    </footer>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

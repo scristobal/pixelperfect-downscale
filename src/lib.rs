@@ -9,6 +9,9 @@ use image::{ImageBuffer, Rgb, RgbImage};
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
 
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+
 /// Result of grid detection on an image.
 pub struct GridInfo {
     pub grid_w: usize,
