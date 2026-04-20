@@ -40,34 +40,27 @@ fn main() {
     let grid = detect_grid(&img, 2, cli.max_grid);
     let elapsed = t0.elapsed();
 
-    let fmt_conf = |score: f64| {
-        if score < 999.0 {
-            format!("{score:.1}")
-        } else {
-            "high".to_string()
-        }
-    };
     println!(
-        "Grid: {}x{} offset=({},{}) confidence=({},{}) [{:.3}s]",
+        "Grid: {}x{} offset=({},{}) confidence={:.2} [{:.3}s]",
         grid.grid_w,
         grid.grid_h,
         grid.offset_x,
         grid.offset_y,
-        fmt_conf(grid.confidence_w),
-        fmt_conf(grid.confidence_h),
+        grid.confidence,
         elapsed.as_secs_f64(),
     );
-    if grid.confidence_w < 2.0 || grid.confidence_h < 2.0 {
-        println!("Warning: low confidence — image may not be upscaled pixel art");
-    }
-
-    let mut downsampled =
-        downsample_image(&img, grid.grid_w, grid.grid_h, grid.offset_x, grid.offset_y);
+    let upscaled = grid.confidence >= 0.7;
+    let mut downsampled = if upscaled {
+        downsample_image(&img, grid.grid_w, grid.grid_h, grid.offset_x, grid.offset_y)
+    } else {
+        println!("No grid detected — image appears to be at native resolution");
+        img.clone()
+    };
     let (dw, dh) = downsampled.dimensions();
     println!("Downsampled: {dw} x {dh}");
 
     if !cli.no_clean {
-        let (cleaned, info) = clean_palette(&img, &downsampled);
+        let (cleaned, info) = clean_palette(&downsampled);
         downsampled = cleaned;
         println!(
             "Palette: {} unique → {} dominant (removed {})",

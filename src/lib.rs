@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use image::{ImageBuffer, Rgb, RgbImage};
-use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
+use rustfft::num_complex::Complex;
 
 /// Result of grid detection on an image.
 pub struct GridInfo {
@@ -15,8 +15,10 @@ pub struct GridInfo {
     pub grid_h: usize,
     pub offset_x: usize,
     pub offset_y: usize,
-    pub confidence_w: f64,
-    pub confidence_h: f64,
+    /// Fraction of pixel variance explained by cell-median quantization
+    /// (0..=1). Near 1 for a real upscaled grid, near 0 when the image is
+    /// already at native resolution.
+    pub confidence: f64,
 }
 
 /// Average autocorrelation at the first harmonics (1x..5x) of `period`.
@@ -36,9 +38,8 @@ fn harmonic_score(period: usize, autocorr: &[f64], max_lag: usize) -> f64 {
 ///
 /// Candidates are local maxima in the autocorrelation. Each candidate and
 /// its +/-1 neighbours are scored by their harmonic average to handle
-/// compression-smeared peaks. Confidence is the ratio of the winning peak
-/// to the median autocorrelation over the search range.
-fn detect_period(signal: &[f64], min_size: usize, max_size: usize) -> (usize, f64) {
+/// compression-smeared peaks.
+fn detect_period(signal: &[f64], min_size: usize, max_size: usize) -> usize {
     let n = signal.len();
     let fft_len = n.next_power_of_two();
 
@@ -72,7 +73,7 @@ fn detect_period(signal: &[f64], min_size: usize, max_size: usize) -> (usize, f6
     }
 
     if peaks.is_empty() {
-        return (min_size, 0.0);
+        return min_size;
     }
 
     // Score each peak and its +/-1 neighbours by harmonic average.
@@ -94,20 +95,97 @@ fn detect_period(signal: &[f64], min_size: usize, max_size: usize) -> (usize, f6
         }
     }
 
-    // Confidence: how much the peak stands out from the background.
-    let mut ac_slice: Vec<f64> = autocorr[min_size..max_lag].to_vec();
-    ac_slice.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = ac_slice[ac_slice.len() / 2];
-    let confidence = autocorr[best_lag] / median.max(1e-10);
+    best_lag
+}
 
-    (best_lag, confidence)
+/// Fraction of pixel variance explained by quantizing each cell to its
+/// per-channel median. ~1 when the grid is real (cells near-uniform), ~0
+/// when the image is already at native resolution.
+fn explained_variance(
+    img: &RgbImage,
+    grid_w: usize,
+    grid_h: usize,
+    offset_x: usize,
+    offset_y: usize,
+) -> f64 {
+    let (width, height) = img.dimensions();
+    let (w, h) = (width as usize, height as usize);
+    let n_cells_x = w.saturating_sub(offset_x) / grid_w;
+    let n_cells_y = h.saturating_sub(offset_y) / grid_h;
+    if n_cells_x == 0 || n_cells_y == 0 {
+        return 0.0;
+    }
+    let covered_w = n_cells_x * grid_w;
+    let covered_h = n_cells_y * grid_h;
+    let total_px = (covered_w * covered_h) as f64;
+
+    let mut sums = [0.0_f64; 3];
+    for y in 0..covered_h {
+        for x in 0..covered_w {
+            let p = img
+                .get_pixel((offset_x + x) as u32, (offset_y + y) as u32)
+                .0;
+            for c in 0..3 {
+                sums[c] += p[c] as f64;
+            }
+        }
+    }
+    let means = [sums[0] / total_px, sums[1] / total_px, sums[2] / total_px];
+
+    let mut total_ss = 0.0_f64;
+    let mut within_ss = 0.0_f64;
+    let cell_px = grid_w * grid_h;
+    let mut chs: [Vec<u8>; 3] = [
+        Vec::with_capacity(cell_px),
+        Vec::with_capacity(cell_px),
+        Vec::with_capacity(cell_px),
+    ];
+    for by in 0..n_cells_y {
+        for bx in 0..n_cells_x {
+            for c in 0..3 {
+                chs[c].clear();
+            }
+            for dy in 0..grid_h {
+                for dx in 0..grid_w {
+                    let p = img
+                        .get_pixel(
+                            (offset_x + bx * grid_w + dx) as u32,
+                            (offset_y + by * grid_h + dy) as u32,
+                        )
+                        .0;
+                    for c in 0..3 {
+                        chs[c].push(p[c]);
+                    }
+                }
+            }
+            let mut median = [0.0_f64; 3];
+            for c in 0..3 {
+                chs[c].sort_unstable();
+                median[c] = chs[c][chs[c].len() / 2] as f64;
+            }
+            for c in 0..3 {
+                for &v in &chs[c] {
+                    let dw = v as f64 - median[c];
+                    within_ss += dw * dw;
+                    let dt = v as f64 - means[c];
+                    total_ss += dt * dt;
+                }
+            }
+        }
+    }
+
+    if total_ss <= 1e-10 {
+        return 1.0;
+    }
+    1.0 - (within_ss / total_ss)
 }
 
 /// Find the pixel offset where grid cells start.
 ///
-/// The diff signal peaks at transitions *between* cells. We find the offset
-/// that best aligns `off + k*grid - 1` with high diffs, then add 1 because
-/// the cell starts on the pixel after the boundary.
+/// `h_diff[x]` holds the transition between pixel x and x+1. If cells start
+/// at pixel `off` with period `grid`, boundaries land at `off + k*grid - 1`
+/// for k >= 1, so the offset whose boundary positions best line up with the
+/// diff peaks is the cell start itself.
 fn detect_offset(diff_signal: &[f64], grid_size: usize) -> usize {
     let n = diff_signal.len();
     let mut best_offset = 0;
@@ -126,7 +204,7 @@ fn detect_offset(diff_signal: &[f64], grid_size: usize) -> usize {
         }
     }
 
-    (best_offset + 1) % grid_size
+    best_offset
 }
 
 /// Detect the pixel grid by finding spectral peaks in pixel differences.
@@ -141,8 +219,7 @@ pub fn detect_grid(img: &RgbImage, min_size: usize, max_size: usize) -> GridInfo
             grid_h: min_size,
             offset_x: 0,
             offset_y: 0,
-            confidence_w: 0.0,
-            confidence_h: 0.0,
+            confidence: 0.0,
         };
     }
 
@@ -170,18 +247,18 @@ pub fn detect_grid(img: &RgbImage, min_size: usize, max_size: usize) -> GridInfo
         }
     }
 
-    let (grid_w, confidence_w) = detect_period(&h_diff, min_size, max_size);
-    let (grid_h, confidence_h) = detect_period(&v_diff, min_size, max_size);
+    let grid_w = detect_period(&h_diff, min_size, max_size);
+    let grid_h = detect_period(&v_diff, min_size, max_size);
     let offset_x = detect_offset(&h_diff, grid_w);
     let offset_y = detect_offset(&v_diff, grid_h);
+    let confidence = explained_variance(img, grid_w, grid_h, offset_x, offset_y);
 
     GridInfo {
         grid_w,
         grid_h,
         offset_x,
         offset_y,
-        confidence_w,
-        confidence_h,
+        confidence,
     }
 }
 
@@ -231,21 +308,20 @@ pub struct PaletteInfo {
     pub palette_size: usize,
 }
 
-/// Detect the dominant palette from a reference image and remap a target
-/// image to use only those colours.
+/// Detect the dominant palette of an image and remap it to use only those
+/// colours.
 ///
-/// The reference image (typically the original upscaled input) provides a
-/// clean frequency signal. Colours below 0.05% of total pixels are treated
-/// as compression artifacts and discarded. Survivors are merged by weighted
-/// average until all pairs have squared Euclidean distance >= 50.
-pub fn clean_palette(reference: &RgbImage, target: &RgbImage) -> (RgbImage, PaletteInfo) {
-    let (rw, rh) = reference.dimensions();
-    let total_pixels = (rw as usize) * (rh as usize);
+/// Colours are collected from `img` (expected to be the median-downsampled
+/// output, which has already removed most compression noise). Clusters are
+/// merged by weighted average until every pair has squared Euclidean
+/// distance >= `MIN_DIST_SQ`.
+pub fn clean_palette(img: &RgbImage) -> (RgbImage, PaletteInfo) {
+    let (w, h) = img.dimensions();
 
     let mut freq: HashMap<[u8; 3], usize> = HashMap::new();
-    for y in 0..rh {
-        for x in 0..rw {
-            *freq.entry(reference.get_pixel(x, y).0).or_default() += 1;
+    for y in 0..h {
+        for x in 0..w {
+            *freq.entry(img.get_pixel(x, y).0).or_default() += 1;
         }
     }
 
@@ -253,7 +329,7 @@ pub fn clean_palette(reference: &RgbImage, target: &RgbImage) -> (RgbImage, Pale
 
     if unique_colors <= 2 {
         return (
-            target.clone(),
+            img.clone(),
             PaletteInfo {
                 unique_colors,
                 palette_size: unique_colors,
@@ -261,80 +337,43 @@ pub fn clean_palette(reference: &RgbImage, target: &RgbImage) -> (RgbImage, Pale
         );
     }
 
-    // Keep colours covering at least 0.05% of the reference image.
+    // Merge radius in squared RGB distance (~22 units). Wide enough to
+    // absorb compression bleed and per-channel-median artefacts at cell
+    // boundaries without merging distinct palette entries.
+    const MERGE_DIST_SQ: f64 = 500.0;
+
+    // Leader clustering with fixed seeds. Colours are processed in
+    // descending frequency order: each either lands within MERGE_DIST_SQ of
+    // an existing seed (absorbed into it) or becomes a new seed. Seeds are
+    // never averaged, so by induction every pair is >= MERGE_DIST_SQ apart
+    // — which makes a second pass over the cleaned output a no-op.
     let mut colors: Vec<([u8; 3], usize)> = freq.into_iter().collect();
     colors.sort_by(|a, b| b.1.cmp(&a.1));
 
-    let threshold = (total_pixels as f64 * 0.0005).max(1.0) as usize;
-    let candidate_count = colors
-        .iter()
-        .take_while(|&&(_, c)| c >= threshold)
-        .count()
-        .max(2);
-
-    // Agglomerative merge until all pairs are perceptually distinct.
-    const MIN_DIST_SQ: f64 = 50.0;
-
-    let mut clusters: Vec<([f64; 3], usize)> = colors[..candidate_count]
-        .iter()
-        .map(|&(c, n)| ([c[0] as f64, c[1] as f64, c[2] as f64], n))
-        .collect();
-
-    loop {
-        if clusters.len() <= 2 {
-            break;
-        }
-
-        let mut best_dist = f64::MAX;
-        let mut best_i = 0;
-        let mut best_j = 1;
-        for i in 0..clusters.len() {
-            for j in (i + 1)..clusters.len() {
-                let dr = clusters[i].0[0] - clusters[j].0[0];
-                let dg = clusters[i].0[1] - clusters[j].0[1];
-                let db = clusters[i].0[2] - clusters[j].0[2];
-                let d = dr * dr + dg * dg + db * db;
-                if d < best_dist {
-                    best_dist = d;
-                    best_i = i;
-                    best_j = j;
-                }
+    let mut seeds: Vec<[u8; 3]> = Vec::new();
+    for (c, _) in colors {
+        let mut near = false;
+        for s in &seeds {
+            let dr = c[0] as f64 - s[0] as f64;
+            let dg = c[1] as f64 - s[1] as f64;
+            let db = c[2] as f64 - s[2] as f64;
+            if dr * dr + dg * dg + db * db < MERGE_DIST_SQ {
+                near = true;
+                break;
             }
         }
-
-        if best_dist >= MIN_DIST_SQ {
-            break;
+        if !near {
+            seeds.push(c);
         }
-
-        let (lo, hi) = if clusters[best_i].1 <= clusters[best_j].1 {
-            (best_i, best_j)
-        } else {
-            (best_j, best_i)
-        };
-        let (ci, ni) = clusters[lo];
-        let (cj, nj) = clusters[hi];
-        let total = (ni + nj) as f64;
-        let merged = [
-            (ci[0] * ni as f64 + cj[0] * nj as f64) / total,
-            (ci[1] * ni as f64 + cj[1] * nj as f64) / total,
-            (ci[2] * ni as f64 + cj[2] * nj as f64) / total,
-        ];
-        clusters[hi] = (merged, ni + nj);
-        clusters.swap_remove(lo);
     }
 
-    let palette: Vec<[u8; 3]> = clusters
-        .iter()
-        .map(|(c, _)| [c[0].round() as u8, c[1].round() as u8, c[2].round() as u8])
-        .collect();
+    let palette = seeds;
     let palette_size = palette.len();
 
-    // Remap every pixel in the target to its nearest palette entry.
-    let (tw, th) = target.dimensions();
-    let mut output = ImageBuffer::new(tw, th);
-    for y in 0..th {
-        for x in 0..tw {
-            let p = target.get_pixel(x, y).0;
+    let mut output = ImageBuffer::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let p = img.get_pixel(x, y).0;
             let nearest = palette
                 .iter()
                 .min_by_key(|c| {
